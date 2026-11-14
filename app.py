@@ -128,23 +128,39 @@ def qr_svg(payload):
    if v: paths.append(f'M{c},{r}h1v1h-1z')
  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 29 29" width="260" height="260"><rect x="-4" y="-4" width="29" height="29" fill="white"/><path fill="#111" d="'+''.join(paths)+'"/></svg>'
 
-def xlsx(rows):
+def xlsx(sheets):
  def col(n):
   out=''
   while n: n,r=divmod(n-1,26); out=chr(65+r)+out
   return out
- xmlrows=[]
- for ri,row in enumerate(rows,1):
-  cells=[]
-  for ci,val in enumerate(row,1): cells.append(f'<c r="{col(ci)}{ri}" t="inlineStr"><is><t xml:space="preserve">{escape(str(val if val is not None else ""))}</t></is></c>')
-  xmlrows.append(f'<row r="{ri}">'+''.join(cells)+'</row>')
- sheet='<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join(xmlrows)+'</sheetData></worksheet>'
- files={'[Content_Types].xml':'<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>','_rels/.rels':'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>','xl/workbook.xml':'<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Ingresos semanales" sheetId="1" r:id="rId1"/></sheets></workbook>','xl/_rels/workbook.xml.rels':'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>','xl/worksheets/sheet1.xml':sheet}
+ def worksheet(rows):
+  xmlrows=[]
+  for ri,row in enumerate(rows,1):
+   cells=[]
+   for ci,val in enumerate(row,1):
+    cells.append(f'<c r="{col(ci)}{ri}" t="inlineStr"><is><t xml:space="preserve">{escape(str(val if val is not None else ""))}</t></is></c>')
+   xmlrows.append(f'<row r="{ri}">'+''.join(cells)+'</row>')
+  return '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join(xmlrows)+'</sheetData></worksheet>'
+ content_types='<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+ rels='<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+ sheet_tags=[]; workbook_rels=[]; files={}
+ for index,(name,rows) in enumerate(sheets,1):
+  content_types+=f'<Override PartName="/xl/worksheets/sheet{index}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+  sheet_tags.append(f'<sheet name="{escape(name)}" sheetId="{index}" r:id="rId{index}"/>')
+  workbook_rels.append(f'<Relationship Id="rId{index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{index}.xml"/>')
+  files[f'xl/worksheets/sheet{index}.xml']=worksheet(rows)
+ content_types+='</Types>'
+ rels+='</Relationships>'
+ files.update({
+  '[Content_Types].xml':content_types,
+  '_rels/.rels':'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+  'xl/workbook.xml':'<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+''.join(sheet_tags)+'</sheets></workbook>',
+  'xl/_rels/workbook.xml.rels':rels
+ })
  out=io.BytesIO()
  with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
   for name,value in files.items(): z.writestr(name,value)
  return out.getvalue()
-
 class App(BaseHTTPRequestHandler):
  server_version='Atemisa/1.0'
  def log_message(self,fmt,*args): print(now().strftime('%H:%M:%S'),fmt%args)
@@ -226,7 +242,16 @@ class App(BaseHTTPRequestHandler):
    with connect() as c: s=c.execute('SELECT * FROM students WHERE id=?',(q,)).fetchone()
    if not s: return self.send('No encontrado',404)
    label,cls=access(s); body=f'<div class="panel" style="text-align:center"><h1>{esc(s["name"])}</h1>{qr_svg("AT"+s["qr"])}<p>Escanea este código para registrar asistencia.</p><p><span class="badge {cls}">{esc(label)}</span></p><button class="no-print" onclick="window.print()">Imprimir QR</button> <a class="btn secondary no-print" href="/qr.svg?id={s["id"]}">Descargar QR (SVG)</a> <a class="btn secondary no-print" href="/#alumnos">Volver a alumnos</a></div>'
+   body=body.replace('<a class="btn secondary no-print" href="/#alumnos">Volver a alumnos</a>',f'<a class="btn secondary no-print" href="/credential?id={s["id"]}">Credencial</a> <a class="btn secondary no-print" href="/#alumnos">Volver a alumnos</a>')
    return self.send(self.page('Código QR',body,user))
+  if path=='/credential':
+   q=urllib.parse.parse_qs(route.query).get('id',[''])[0]
+   with connect() as c: s=c.execute('SELECT * FROM students WHERE id=?',(q,)).fetchone()
+   if not s: return self.send('No encontrado',404)
+   schedule=s['schedule'] or TRAINING_LABELS.get(s['training_days'],'Por definir')
+   logo='<img class="credential-logo" src="/static/logo.png" alt="">' if (ROOT/'static/logo.png').exists() else ('<img class="credential-logo" src="/static/logo.svg" alt="">' if (ROOT/'static/logo.svg').exists() else '')
+   body=f'<div class="credential-wrap"><article class="credential"><header class="credential-head">{logo}<div><strong>ARTEMISA</strong><small>MUAY THAI · CREDENCIAL</small></div></header><div class="credential-content"><div class="photo-slot"><span>FOTO<br>INFANTIL<br>2.5 × 3 cm</span></div><div class="credential-data"><h1>{esc(s["name"])}</h1><p><b>Horario</b><span>{esc(schedule)}</span></p><p><b>Tutor</b><span>{esc(s["emergency_name"])}</span></p><p><b>Contacto del tutor</b><span>{esc(s["emergency_phone"])}</span></p></div><div class="credential-qr">{qr_svg("AT"+s["qr"])}</div></div><footer>Identificación de alumno · Presentar al ingresar</footer></article><div class="actions no-print credential-actions"><button onclick="window.print()">Imprimir credencial</button><a class="btn secondary" href="/qr?id={s["id"]}">Volver al QR</a> <a class="btn secondary" href="/#alumnos">Volver al panel</a></div></div>'
+   return self.send(self.page('Credencial',body,user))
   if path=='/qr.svg':
    q=urllib.parse.parse_qs(route.query).get('id',[''])[0]
    with connect() as c: s=c.execute('SELECT qr,name FROM students WHERE id=?',(q,)).fetchone()
@@ -238,16 +263,39 @@ class App(BaseHTTPRequestHandler):
    with connect() as c: p=c.execute('SELECT p.*,s.name student,u.name AS cashier_name FROM payments p JOIN students s ON s.id=p.student_id JOIN users u ON u.id=p.cashier WHERE p.id=?',(q,)).fetchone()
    if not p: return self.send('Recibo no encontrado',404)
    discount_line=f'<dt>Precio base</dt><dd>{money(p["base_cents"])}</dd><dt>Beca aplicada</dt><dd>{p["discount_pct"]}%</dd>' if p['discount_pct'] else ''
-   body=f'<article class="receipt"><p class="muted">ARTEMISA MUAY THAI</p><h1>Recibo de pago</h1><p>Folio <strong>{esc(p["receipt"])}</strong></p><hr><dl><dt>Alumno</dt><dd>{esc(p["student"])}</dd><dt>Concepto</dt><dd>{esc(p["concept"])}</dd>{discount_line}<dt>Total pagado</dt><dd>{money(p["cents"])} MXN</dd><dt>Fecha</dt><dd>{esc(datetime.fromisoformat(p["paid"]).strftime("%d/%m/%Y %H:%M"))}</dd><dt>Recibió</dt><dd>{esc(p["cashier_name"])}</dd></dl><p class="quiet">Comprobante del pago registrado en el sistema.</p><div class="actions no-print"><button onclick="window.print()">Imprimir / guardar PDF</button><a class="btn secondary" href="/">Volver</a></div></article>'
+   body=f'<article class="receipt"><img class="receipt-watermark" src="/static/logo.png" alt=""><p class="muted">ARTEMISA MUAY THAI</p><h1>Recibo de pago</h1><p>Folio <strong>{esc(p["receipt"])}</strong></p><hr><dl><dt>Alumno</dt><dd>{esc(p["student"])}</dd><dt>Concepto</dt><dd>{esc(p["concept"])}</dd>{discount_line}<dt>Total pagado</dt><dd>{money(p["cents"])} MXN</dd><dt>Fecha</dt><dd>{esc(datetime.fromisoformat(p["paid"]).strftime("%d/%m/%Y %H:%M"))}</dd><dt>Recibió</dt><dd>{esc(p["cashier_name"])}</dd></dl><p class="quiet">Comprobante del pago.</p><div class="actions no-print"><button onclick="window.print()">Imprimir / guardar PDF</button><a class="btn secondary" href="/">Volver</a></div></article>'
    return self.send(self.page('Recibo',body,user))
   if path=='/export.xlsx':
    if user['role']!='admin': return self.send('Acceso denegado',403)
-   start=(date.today()-timedelta(days=date.today().weekday())).isoformat()
-   with connect() as c: rows=c.execute('SELECT p.paid,p.receipt,s.name,p.concept,p.cents,u.name cashier FROM payments p JOIN students s ON s.id=p.student_id JOIN users u ON u.id=p.cashier WHERE date(p.paid)>=? ORDER BY p.paid',(start,)).fetchall()
-   data=[['Fecha y hora','Folio','Alumno','Concepto','Monto MXN','Recepcionista']]; total=0
-   for r in rows: data.append([datetime.fromisoformat(r['paid']).strftime('%d/%m/%Y %H:%M'),r['receipt'],r['name'],r['concept'],f'{r["cents"]/100:.2f}',r['cashier']]); total+=r['cents']
-   data.append(['','','','Total',f'{total/100:.2f}',''])
-   return self.send(xlsx(data),ctype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':'attachment; filename="atemisa-reporte-semanal.xlsx"'})
+   period=urllib.parse.parse_qs(route.query).get('period',['weekly'])[0]
+   today=date.today()
+   end=today.isoformat()
+   if period=='weekly':
+    start=(today-timedelta(days=today.weekday())).isoformat()
+    label='semanal'
+   elif period=='monthly':
+    start=today.replace(day=1).isoformat()
+    label='mensual'
+   elif period=='all':
+    start=None
+    label='completo'
+   else:
+    return self.send('Periodo de reporte no válido',400)
+   payments_where=' WHERE substr(p.paid,1,10)>=? AND substr(p.paid,1,10)<=?' if start else ''
+   attendance_where=' WHERE substr(a.checked,1,10)>=? AND substr(a.checked,1,10)<=?' if start else ''
+   params=(start,end) if start else ()
+   with connect() as c:
+    payments=c.execute('SELECT p.paid,p.receipt,s.name,p.concept,p.cents,p.base_cents,p.discount_pct,u.name cashier FROM payments p JOIN students s ON s.id=p.student_id JOIN users u ON u.id=p.cashier'+payments_where+' ORDER BY p.paid,p.id',params).fetchall()
+    attendance=c.execute('SELECT a.checked,s.name,a.method,a.allowed,u.name receiver_name FROM attendance a JOIN students s ON s.id=a.student_id JOIN users u ON u.id=a.receiver'+attendance_where+' ORDER BY a.checked,a.id',params).fetchall()
+   payment_rows=[['Fecha y hora','Folio','Alumno','Concepto','Monto pagado MXN','Precio base MXN','Descuento %','Recepcionista']]
+   for r in payments:
+    base=r['base_cents'] or r['cents']
+    payment_rows.append([datetime.fromisoformat(r['paid']).strftime('%d/%m/%Y %H:%M'),r['receipt'],r['name'],r['concept'],f'{r["cents"]/100:.2f}',f'{base/100:.2f}',r['discount_pct'],r['cashier']])
+   attendance_rows=[['Fecha y hora','Alumno','Método','Resultado','Registró']]
+   for r in attendance:
+    attendance_rows.append([datetime.fromisoformat(r['checked']).strftime('%d/%m/%Y %H:%M'),r['name'],r['method'],'Permitido' if r['allowed'] else 'Denegado',r['receiver_name']])
+   data=xlsx([('Asistencias',attendance_rows),('Pagos',payment_rows)])
+   return self.send(data,ctype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',headers={'Content-Disposition':f'attachment; filename="atemisa-reporte-{label}.xlsx"'})
   return self.send('No encontrado',404)
  def student_editor(self,user,csrf,student):
   modes=('Mensualidad','Clase individual','Fin de semana')
@@ -295,12 +343,12 @@ class App(BaseHTTPRequestHandler):
   if students:
    for s in students:
     label,kind=access(s); status=''
-    body+='<tr><td><strong>'+esc(s['name'])+'</strong><br><span class="muted">'+str(age_from_birth(s['birth_date']) if s['birth_date'] else s['age'])+' años · '+esc(s['payment_mode'])+' · '+esc(s['status'])+' · pases: '+str(s['class_credits'])+'</span></td><td>'+esc(s['phone'])+'<br><span class="muted">Emergencia: '+esc(s['emergency_name'])+' · '+esc(s['emergency_phone'])+'</span></td><td>'+esc(s['due'] or 'Sin fecha')+'</td><td><span class="badge '+kind+'">'+esc(label)+'</span></td><td><div class="actions"><a href="/qr?id='+str(s['id'])+'" target="_blank">Ver QR</a> <a href="/student?id='+str(s['id'])+'">Editar alumno</a>'+'</div></td></tr>'
+    body+='<tr><td><strong>'+esc(s['name'])+'</strong><br><span class="muted">'+str(age_from_birth(s['birth_date']) if s['birth_date'] else s['age'])+' años · '+esc(s['payment_mode'])+' · '+esc(s['status'])+' · pases: '+str(s['class_credits'])+'</span></td><td>'+esc(s['phone'])+'<br><span class="muted">Emergencia: '+esc(s['emergency_name'])+' · '+esc(s['emergency_phone'])+'</span></td><td>'+esc(s['due'] or 'Sin fecha')+'</td><td><span class="badge '+kind+'">'+esc(label)+'</span></td><td><div class="actions"><a href="/qr?id='+str(s['id'])+'">Ver QR</a> <a href="/credential?id='+str(s['id'])+'">Credencial</a> <a href="/student?id='+str(s['id'])+'">Editar alumno</a>'+'</div></td></tr>'
   else: body+='<tr><td colspan="5">Todavía no hay alumnos.</td></tr>'
   body+='</tbody></table></div></section>'
   if user['role']=='admin':
    people=''.join('<tr><td>'+esc(x['name'])+'</td><td>'+('Activa' if x['active'] else 'Desactivada')+'</td><td><a href="/staff?id='+str(x['id'])+'">Editar</a></td></tr>' for x in staff) or '<tr><td colspan="3">No hay cuentas de recepción.</td></tr>'
-   body+=f'<section id="personal" data-view="personal" class="section cols"><div class="panel"><h2 class="title">Crear cuenta de recepción</h2><p class="muted">El administrador crea la cuenta y establece la contraseña inicial. La recepcionista usará siempre estas credenciales personales para entrar.</p><form class="form" method="post" action="/staff"><input type="hidden" name="csrf" value="{csrf}"><div class="full"><label>Nombre</label><input name="name" maxlength="80" required></div><div class="full"><label>Contraseña inicial (mínimo 12 caracteres)</label><input name="password" type="password" minlength="12" required autocomplete="new-password"></div><div class="full"><label>Confirmar contraseña</label><input name="confirm" type="password" minlength="12" required autocomplete="new-password"></div><button class="full">Crear cuenta</button></form></div><div class="panel"><h2 class="title">Cuentas de recepción</h2><table><thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead><tbody>{people}</tbody></table></div></section><section id="reporte" data-view="reporte" class="section panel"><h2 class="title">Reporte semanal</h2><p class="muted">Detalle de los cobros desde el lunes, incluyendo folio, alumno y recepcionista.</p><a class="btn" href="/export.xlsx">Descargar Excel (.xlsx)</a></section>'
+   body+=f'<section id="personal" data-view="personal" class="section cols"><div class="panel"><h2 class="title">Crear cuenta de recepción</h2><p class="muted">El administrador crea la cuenta y establece la contraseña inicial. La recepcionista usará siempre estas credenciales personales para entrar.</p><form class="form" method="post" action="/staff"><input type="hidden" name="csrf" value="{csrf}"><div class="full"><label>Nombre</label><input name="name" maxlength="80" required></div><div class="full"><label>Contraseña inicial (mínimo 12 caracteres)</label><input name="password" type="password" minlength="12" required autocomplete="new-password"></div><div class="full"><label>Confirmar contraseña</label><input name="confirm" type="password" minlength="12" required autocomplete="new-password"></div><button class="full">Crear cuenta</button></form></div><div class="panel"><h2 class="title">Cuentas de recepción</h2><table><thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead><tbody>{people}</tbody></table></div></section><section id="reporte" data-view="reporte" class="section panel"><h2 class="title">Reportes</h2><p class="muted">Cada archivo contiene pestañas de asistencias y pagos para el periodo seleccionado.</p><div class="actions"><a class="btn" href="/export.xlsx?period=weekly">Descargar reporte semanal</a><a class="btn" href="/export.xlsx?period=monthly">Descargar reporte mensual</a><a class="btn secondary" href="/export.xlsx?period=all">Descargar historial completo</a></div></section>'
   if user['role']=='admin':
    body+='<section id="actividad" data-view="actividad" class="section cols"><div class="panel"><h2 class="title">Asistencia de hoy</h2><div class="scroll"><table><thead><tr><th>Hora</th><th>Alumno</th><th>Acceso</th><th>Registró</th></tr></thead><tbody>'
    body+=''.join(f'<tr><td>{datetime.fromisoformat(a["checked"]).strftime("%H:%M")}</td><td>{esc(a["student"])}</td><td>{"Permitido" if a["allowed"] else "Denegado"}</td><td>{esc(a["receiver_name"])}</td></tr>' for a in ats) or '<tr><td colspan="4">Sin registros.</td></tr>'
@@ -308,7 +356,7 @@ class App(BaseHTTPRequestHandler):
    body+=''.join(f'<tr><td>{datetime.fromisoformat(p["paid"]).strftime("%d/%m %H:%M")}</td><td>{esc(p["student"])}<br>{esc(p["concept"])}</td><td>{money(p["cents"])}</td><td>{esc(p["received_by"])}</td><td><a href="/receipt?id={p["id"]}">Recibo</a></td></tr>' for p in pays) or '<tr><td colspan="5">Sin cobros.</td></tr>'
    body+=f'</tbody></table></div></div></section><p class="quiet">.</p>'
   sidenav='<aside class="sidebar"><details open><summary>Navegación</summary><nav><a href="#entrada" data-view-target="entrada">Registrar asistencia</a><a href="#alumnos" data-view-target="alumnos">Alumnos</a><a href="#cobro" data-view-target="cobro">Cobros</a>'
-  if user['role']=='admin': sidenav+='<details class="admin-nav" open><summary>Administrador</summary><a href="#personal" data-view-target="personal">Cuentas de recepción</a><a href="#precios" data-view-target="precios">Tarifas</a><a href="#reporte" data-view-target="reporte">Reporte semanal</a><a href="#actividad" data-view-target="actividad">Asistencias y actividad</a></details>'
+  if user['role']=='admin': sidenav+='<details class="admin-nav" open><summary>Administrador</summary><a href="#personal" data-view-target="personal">Cuentas de recepción</a><a href="#precios" data-view-target="precios">Tarifas</a><a href="#reporte" data-view-target="reporte">Reportes</a><a href="#actividad" data-view-target="actividad">Asistencias y actividad</a></details>'
   sidenav+='</nav></details></aside>'
   body='<div class="layout">'+sidenav+'<div class="main-content">'+body+'</div></div>'
   return self.send(self.page('Panel',body,user))
