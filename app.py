@@ -33,8 +33,7 @@ def initialize():
    try: 
     c.execute(migration)
 except Exception: 
-    pass 
-
+    pass  
 for mode in ('Mensualidad', 'Clase individual', 'Fin de semana', 'Clase personalizada'):
     c.execute('INSERT OR IGNORE INTO prices(mode,cents) VALUES(?,?)', (mode, 30000 if mode == 'Clase personalizada' else 0))
 def now(): return datetime.now().astimezone()
