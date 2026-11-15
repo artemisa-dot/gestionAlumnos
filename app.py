@@ -1,5 +1,9 @@
 from __future__ import annotations
-import html, io, secrets, hashlib, sqlite3, string, urllib.parse, zipfile, libsql, os
+import html, io, secrets, hashlib, sqlite3, string, urllib.parse, zipfile, os, threading
+try:
+    import libsql
+except ImportError:
+    libsql = None
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,16 +21,78 @@ def now():
 
 def stamp(): 
     return now().isoformat(timespec='seconds')
-    
+
+# ---------------------------------------------------------------------------
+# Conexión a base de datos: Turso (libsql) en la nube o SQLite local.
+# libsql devuelve tuplas, así que se envuelve para poder leer filas por nombre.
+# ---------------------------------------------------------------------------
+class Row(dict):
+    def __init__(self, cols, vals):
+        super().__init__(zip(cols, vals))
+        self._v = tuple(vals)
+    def __getitem__(self, k):
+        return self._v[k] if isinstance(k, int) else super().__getitem__(k)
+
+class DictCursor:
+    def __init__(self, cur):
+        self._cur = cur
+        self._cols = [d[0] for d in (getattr(cur, 'description', None) or [])]
+    def _row(self, r):
+        return None if r is None else Row(self._cols, r)
+    def fetchone(self):
+        return self._row(self._cur.fetchone())
+    def fetchall(self):
+        return [self._row(r) for r in self._cur.fetchall()]
+    def __iter__(self):
+        return iter(self.fetchall())
+    @property
+    def lastrowid(self):
+        return self._cur.lastrowid
+
+_LOCK = threading.RLock()
+_REMOTE = None
+_WRITE_WORDS = ('INSERT', 'UPDATE', 'DELETE', 'ALTER', 'CREATE', 'REPLACE', 'DROP')
+
+class DictConn:
+    def __init__(self, raw, shared):
+        self._c, self._shared, self._dirty = raw, shared, False
+        _LOCK.acquire()
+    def execute(self, sql, params=()):
+        if sql.lstrip().upper().startswith(_WRITE_WORDS):
+            self._dirty = True
+        return DictCursor(self._c.execute(sql, params))
+    def executescript(self, sql):
+        self._dirty = True
+        return self._c.executescript(sql)
+    def __enter__(self):
+        return self
+    def __exit__(self, et, ev, tb):
+        try:
+            if et is None:
+                self._c.commit()
+                if self._shared and self._dirty:
+                    self._c.sync()
+            else:
+                self._c.rollback()
+        finally:
+            if not self._shared:
+                self._c.close()
+            _LOCK.release()
+        return False
+
 def connect():
+    global _REMOTE
     url = os.getenv("TURSO_DATABASE_URL")
     token = os.getenv("TURSO_AUTH_TOKEN")
     if url and token:
-        conn = libsql.connect("artemisa_replica.db", sync_url=url, auth_token=token)
-        conn.sync()
-        return conn
-    else:
-        return sqlite3.connect("atemisa.db")
+        if libsql is None:
+            raise RuntimeError("Falta instalar libsql (pip install libsql).")
+        if _REMOTE is None:
+            _REMOTE = libsql.connect(str(ROOT / "artemisa_replica.db"), sync_url=url, auth_token=token)
+            _REMOTE.sync()
+        return DictConn(_REMOTE, True)
+    return DictConn(sqlite3.connect(str(ROOT / "atemisa.db")), False)
+
 def initialize():
     with connect() as c:
         c.executescript('''
@@ -210,8 +276,9 @@ class App(BaseHTTPRequestHandler):
    user=c.execute('SELECT * FROM users WHERE id=? AND active=1',(record['user_id'],)).fetchone()
    if not user:
     c.execute('DELETE FROM sessions WHERE token_hash=?',(token_hash,)); return None
-   expiry=(now()+timedelta(days=30)).isoformat(timespec='seconds')
-   c.execute('UPDATE sessions SET expires=?,last_seen=? WHERE token_hash=?',(expiry,stamp(),token_hash))
+   if record['last_seen']<(now()-timedelta(hours=1)).isoformat(timespec='seconds'):
+    expiry=(now()+timedelta(days=30)).isoformat(timespec='seconds')
+    c.execute('UPDATE sessions SET expires=?,last_seen=? WHERE token_hash=?',(expiry,stamp(),token_hash))
   return user,sid,record['csrf']
  def session_cookie(self,sid):
   secure='; Secure' if self.headers.get('X-Forwarded-Proto','').lower()=='https' else ''
@@ -249,7 +316,8 @@ class App(BaseHTTPRequestHandler):
   favicon=f'<link rel="icon" href="{icon}">' if icon else ''
   return f'<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acceso · ARTEMISA</title><link rel="stylesheet" href="/static/app.css">{favicon}</head><body><main class="login"><div class="panel"><div class="login-brand">{logo} ARTEMISA MUAY THAI</div>{body}<p class="quiet">Sistema local · ARTEMISA Muay Thai</p></div></main></body></html>'
  def do_GET(self):
-  route=urllib.parse.urlsplit(self.path); path=route.path; auth=self.auth()
+  route=urllib.parse.urlsplit(self.path); path=route.path
+  auth=None if path.startswith('/static/') else self.auth()
   if path=='/static/app.css': return self.send((ROOT/'static/app.css').read_text(encoding='utf-8'),ctype='text/css; charset=utf-8')
   if path in ('/static/logo.png','/static/logo.svg'):
    logo_path=ROOT/'static'/Path(path).name
@@ -542,7 +610,5 @@ class App(BaseHTTPRequestHandler):
   return self.go('/',self.session_cookie(sid))
 
 def main():
- initialize(); print('Sistema ARTEMISA disponible localmente: http://127.0.0.1:8000'); print('ñam ñam ñam'); ThreadingHTTPServer((HOST,PORT),App).serve_forever()
+ initialize(); print(f'Sistema ARTEMISA disponible en el puerto {PORT} (local: http://127.0.0.1:{PORT})'); print('ñam ñam ñam'); ThreadingHTTPServer((HOST,PORT),App).serve_forever()
 if __name__=='__main__': main()
-
-
