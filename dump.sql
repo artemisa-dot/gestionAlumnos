@@ -1,6 +1,5 @@
 BEGIN TRANSACTION;
 
--- 1. Crear todas las tablas primero
 CREATE TABLE users(id INTEGER PRIMARY KEY,name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','reception')),salt TEXT NOT NULL,pwhash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL);
 CREATE TABLE students(id INTEGER PRIMARY KEY,name TEXT NOT NULL,age INTEGER NOT NULL,phone TEXT NOT NULL,emergency_name TEXT NOT NULL,emergency_phone TEXT NOT NULL,qr TEXT UNIQUE NOT NULL,status TEXT NOT NULL DEFAULT 'Activo',due TEXT,class_credits INTEGER NOT NULL DEFAULT 0,birth_date TEXT,payment_mode TEXT NOT NULL DEFAULT 'Mensualidad',scholarship_pct INTEGER NOT NULL DEFAULT 0,schedule TEXT NOT NULL DEFAULT '',training_days TEXT NOT NULL DEFAULT '',created TEXT NOT NULL, tutor_name TEXT NOT NULL DEFAULT '', tutor_phone TEXT NOT NULL DEFAULT '');
 CREATE TABLE prices(mode TEXT PRIMARY KEY,cents INTEGER NOT NULL DEFAULT 0);
@@ -8,7 +7,7 @@ CREATE TABLE attendance(id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFER
 CREATE TABLE payments(id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFERENCES students(id),cents INTEGER NOT NULL,concept TEXT NOT NULL,paid TEXT NOT NULL,cashier INTEGER NOT NULL REFERENCES users(id),receipt TEXT UNIQUE NOT NULL,base_cents INTEGER NOT NULL DEFAULT 0,discount_pct INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE sessions(token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),csrf TEXT NOT NULL,expires TEXT NOT NULL,last_seen TEXT NOT NULL);
 
--- 2. Insertar todos los datos después
+
 INSERT INTO "users" VALUES(1,'ProfeEli','admin','f67f235b26073113a4ca5d0c6966a773','97b46934fa03a32e3a3032648c3b8c6aa57f463f88d8291a14df6836fc7bfbeb',1,'2026-11-14T12:30:32-06:00');
 INSERT INTO "students" VALUES(1,'yael',20,'2397','mama','320473124','5827562825','Activo','2027-02-16',1,'2005-12-06','Mensualidad',0,'','MWF','2026-11-14T12:41:39-06:00','','');
 INSERT INTO "students" VALUES(2,'1',20,'2397','mama','3235552','1801070860','Activo','2026-11-18',0,'2005-12-06','Mensualidad',0,'','TTS','2026-11-14T14:16:10-06:00','','');
@@ -24,7 +23,6 @@ INSERT INTO "sessions" VALUES('f452c8de3cb5327abc4ce5b5bb0071e47d02ee61fa562842f
 INSERT INTO "sessions" VALUES('c698ae35fa8edb88f32076164ea73b55fe49e6064bd078e75d1166a095c52fda',1,'8KXiIkV03KPkru7V6m3daeeqc6NViWMc','2026-12-14T14:13:30-06:00','2026-11-14T14:13:30-06:00');
 INSERT INTO "sessions" VALUES('f4c4bb274dba52c7ed9f1ac5ca39de4363621676ea7a7d184dc205664d55baf5',1,'O5NECe6InxjNHVDYoNR8CuaBIGsJ8A9f','2026-12-14T18:36:51-06:00','2026-11-14T18:36:51-06:00');
 
--- 3. Crear índices y confirmar
 CREATE INDEX ix_payday ON payments(paid);
 CREATE INDEX ix_attday ON attendance(checked);
 COMMIT;
