@@ -1,5 +1,5 @@
 from __future__ import annotations
-import html, io, secrets, hashlib, sqlite3, string, urllib.parse, zipfile, libsql
+import html, io, secrets, hashlib, sqlite3, string, urllib.parse, zipfile, libsql, os
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
