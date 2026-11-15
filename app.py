@@ -21,22 +21,38 @@ def connect():
     else:
         return sqlite3.connect("atemisa.db")
 def initialize():
- with connect() as c:
-  c.executescript('''CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','reception')),salt TEXT NOT NULL,pwhash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY,name TEXT NOT NULL,age INTEGER NOT NULL,phone TEXT NOT NULL,emergency_name TEXT NOT NULL,emergency_phone TEXT NOT NULL,qr TEXT UNIQUE NOT NULL,status TEXT NOT NULL DEFAULT 'Activo',due TEXT,class_credits INTEGER NOT NULL DEFAULT 0,birth_date TEXT,payment_mode TEXT NOT NULL DEFAULT 'Mensualidad',scholarship_pct INTEGER NOT NULL DEFAULT 0,schedule TEXT NOT NULL DEFAULT '',training_days TEXT NOT NULL DEFAULT '',created TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFERENCES students(id),cents INTEGER NOT NULL,concept TEXT NOT NULL,paid TEXT NOT NULL,cashier INTEGER NOT NULL REFERENCES users(id),receipt TEXT UNIQUE NOT NULL,base_cents INTEGER NOT NULL DEFAULT 0,discount_pct INTEGER NOT NULL DEFAULT 0);
-  CREATE TABLE IF NOT EXISTS attendance(id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFERENCES students(id),checked TEXT NOT NULL,method TEXT NOT NULL,receiver INTEGER NOT NULL REFERENCES users(id),allowed INTEGER NOT NULL);
-  CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),csrf TEXT NOT NULL,expires TEXT NOT NULL,last_seen TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS prices(mode TEXT PRIMARY KEY,cents INTEGER NOT NULL DEFAULT 0);
-  CREATE INDEX IF NOT EXISTS ix_payday ON payments(paid); CREATE INDEX IF NOT EXISTS ix_attday ON attendance(checked);''')
-  for migration in migrations:
+    with connect() as c:
+        c.executescript('''
+            CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','reception')),salt TEXT NOT NULL,pwhash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS students(id INTEGER PRIMARY KEY,name TEXT NOT NULL,age INTEGER NOT NULL,phone TEXT NOT NULL,emergency_name TEXT NOT NULL,emergency_phone TEXT NOT NULL,qr TEXT UNIQUE NOT NULL,status TEXT NOT NULL DEFAULT 'Activo',due TEXT,class_credits INTEGER NOT NULL DEFAULT 0,birth_date TEXT,payment_mode TEXT NOT NULL DEFAULT 'Mensualidad',scholarship_pct INTEGER NOT NULL DEFAULT 0,schedule TEXT NOT NULL DEFAULT '',training_days TEXT NOT NULL DEFAULT '',created TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS payments(id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFERENCES students(id),cents INTEGER NOT NULL,concept TEXT NOT NULL,paid TEXT NOT NULL,cashier INTEGER NOT NULL REFERENCES users(id),receipt TEXT UNIQUE NOT NULL,base_cents INTEGER NOT NULL DEFAULT 0,discount_pct INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS attendance(id INTEGER PRIMARY KEY,student_id INTEGER NOT NULL REFERENCES students(id),checked TEXT NOT NULL,method TEXT NOT NULL,receiver INTEGER NOT NULL REFERENCES users(id),allowed INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),csrf TEXT NOT NULL,expires TEXT NOT NULL,last_seen TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS prices(mode TEXT PRIMARY KEY,cents INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS ix_payday ON payments(paid); 
+            CREATE INDEX IF NOT EXISTS ix_attday ON attendance(checked);
+        ''')
+        
+        migrations = [
+            "ALTER TABLE students ADD COLUMN class_credits INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE students ADD COLUMN birth_date TEXT",
+            "ALTER TABLE students ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'Mensualidad'",
+            "ALTER TABLE students ADD COLUMN scholarship_pct INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE students ADD COLUMN schedule TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE students ADD COLUMN training_days TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE payments ADD COLUMN base_cents INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE payments ADD COLUMN discount_pct INTEGER NOT NULL DEFAULT 0"
+        ]
+        
+        for migration in migrations:
             try:
                 c.execute(migration)
             except Exception:
                 pass
-for mode in ('Mensualidad', 'Clase individual', 'Fin de semana', 'Clase personalizada'):
-    c.execute('INSERT OR IGNORE INTO prices(mode,cents) VALUES(?,?)', (mode, 30000 if mode == 'Clase personalizada' else 0))
-def now(): return datetime.now().astimezone()
+                
+        for mode in ('Mensualidad', 'Clase individual', 'Fin de semana', 'Clase personalizada'):
+            c.execute('INSERT OR IGNORE INTO prices(mode,cents) VALUES(?,?)', (mode, 30000 if mode == 'Clase personalizada' else 0))
+            def now(): return datetime.now().astimezone()
 def stamp(): return now().isoformat(timespec='seconds')
 def age_from_birth(value):
  if not value: return None
