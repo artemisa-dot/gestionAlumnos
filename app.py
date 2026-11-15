@@ -12,8 +12,14 @@ HOST='0.0.0.0'
 PORT=int(os.environ.get("PORT", 8000))
 
 def connect():
-    url = os.getenv("libsql://artemisa-db-artemisa-dot.aws-us-east-2.turso.io")
-    token = os.getenv("eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTQ3MDU1NjQsImlkIjoiMDFhMWRjYzAtZjMwMS03MmJhLTgwZGItMzI3NDk1MWM0ZDVjIiwia2lkIjoiMVY5NF9kd201d3Y1RlFIX3Qwc040UFhUTHpoWm92QlBGS2FRN2RvbUFBcyIsInJpZCI6ImY2YjczMzFhLTk1ZTItNDkyOS05MzJlLWUyYWU4Njg0ZWY2NiJ9.s8CBO_q_zmMIxjhedg_lLyPWB8ckuMXchWQWEcr9YHd4MNevy-KZLeuZB1z3Lbfy20OHPmeNeNwVVswO8Ch0Ag")
+    url = os.getenv("TURSO_DATABASE_URL")
+    token = os.getenv("TURSO_AUTH_TOKEN")
+    if url and token:
+        conn = libsql.connect("artemisa_replica.db", sync_url=url, auth_token=token)
+        conn.sync()
+        return conn
+    else:
+        return sqlite3.connect("atemisa.db")
 def initialize():
  with connect() as c:
   c.executescript('''CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('admin','reception')),salt TEXT NOT NULL,pwhash TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL);
