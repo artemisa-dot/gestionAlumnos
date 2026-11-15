@@ -5,12 +5,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from xml.sax.saxutils import escape
 from http.cookies import SimpleCookie
-ROOT=Path(__file__).resolve().parent
-DB=ROOT/'atemisa.db'
-SESSIONS={}
-HOST='0.0.0.0'
-PORT=int(os.environ.get("PORT", 8000))
 
+ROOT = Path(__file__).resolve().parent
+DB = ROOT / 'atemisa.db'
+SESSIONS = {}
+HOST = '0.0.0.0'
+PORT = int(os.environ.get("PORT", 8000))
+
+def now(): 
+    return datetime.now().astimezone()
+
+def stamp(): 
+    return now().isoformat(timespec='seconds')
+    
 def connect():
     url = os.getenv("TURSO_DATABASE_URL")
     token = os.getenv("TURSO_AUTH_TOKEN")
@@ -52,8 +59,8 @@ def initialize():
                 
         for mode in ('Mensualidad', 'Clase individual', 'Fin de semana', 'Clase personalizada'):
             c.execute('INSERT OR IGNORE INTO prices(mode,cents) VALUES(?,?)', (mode, 30000 if mode == 'Clase personalizada' else 0))
-            def now(): return datetime.now().astimezone()
-def stamp(): return now().isoformat(timespec='seconds')
+            
+
 def age_from_birth(value):
  if not value: return None
  born=date.fromisoformat(value); today=date.today()
